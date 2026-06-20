@@ -1,0 +1,97 @@
+# Production deployment. Single command:  docker compose up -d
+#
+#   init   -> migrate + seed ATS platform reference rows (offline, one-shot)
+#   api    -> uvicorn (FastAPI), published on 127.0.0.1:8765 only
+#   worker -> discovery -> scoring loop + daily backup (single instance)
+#
+# Ollama runs on the HOST (not containerized). If it is down, scoring falls back
+# to token-overlap automatically — nothing here depends on Ollama being up.
+# Company-universe seeding is NEVER automatic; run it deliberately:
+#   docker compose run --rm api python -m app.cli seed-companies
+name: job-copilot
+
+x-app-env: &app-env
+  SCRAPER_BASE_DIR: /data
+  SCRAPER_API_HOST: 0.0.0.0            # bind inside the container; host exposure is the publish line
+  SCRAPER_OLLAMA_URL: ${SCRAPER_OLLAMA_URL:-http://host.docker.internal:11434}
+  SCRAPER_EMBEDDING_MODEL: ${SCRAPER_EMBEDDING_MODEL:-nomic-embed-text}
+  SCRAPER_SHORTLIST_THRESHOLD: ${SCRAPER_SHORTLIST_THRESHOLD:-0.6}
+  SCRAPER_EXPERIENCE_STRETCH_MONTHS: ${SCRAPER_EXPERIENCE_STRETCH_MONTHS:-24}
+  SCRAPER_GMAIL_CREDENTIALS: ${SCRAPER_GMAIL_CREDENTIALS:-/data/secrets/gmail_credentials.json}
+  SCRAPER_GMAIL_TOKEN: ${SCRAPER_GMAIL_TOKEN:-/data/secrets/gmail_token.json}
+
+x-build: &app-build
+  context: .
+  dockerfile: Dockerfile
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-extra-hosts: &host-gateway
+  - "host.docker.internal:host-gateway"   # native on macOS/Windows; enables it on Linux too
+
+services:
+  init:
+    build: *app-build
+    image: job-copilot:latest
+    command: ["python", "-m", "app.cli", "init"]
+    environment: *app-env
+    volumes:
+      - "scraper_data:/data"
+    extra_hosts: *host-gateway
+    restart: "no"
+    mem_limit: 256m
+    logging: *default-logging
+
+  api:
+    build: *app-build
+    image: job-copilot:latest
+    command: ["python", "-m", "app.cli", "serve"]
+    environment: *app-env
+    volumes:
+      - "scraper_data:/data"
+    extra_hosts: *host-gateway
+    ports:
+      - "127.0.0.1:${HOST_API_PORT:-8765}:8765"   # loopback only (Tailscale/dashboard later)
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "healthcheck-api.sh"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 30s
+    mem_limit: 512m
+    mem_reservation: 256m
+    restart: unless-stopped
+    logging: *default-logging
+
+  worker:
+    build: *app-build
+    image: job-copilot:latest
+    # Single instance only — the fcntl heavy-resource lock assumes one worker.
+    command: ["python", "-m", "app.cli", "worker", "--interval", "${WORKER_INTERVAL:-1800}"]
+    environment: *app-env
+    volumes:
+      - "scraper_data:/data"
+    extra_hosts: *host-gateway
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.cli", "healthcheck", "--worker", "--max-age", "4000"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    mem_limit: 768m
+    mem_reservation: 256m
+    restart: unless-stopped
+    logging: *default-logging
+
+volumes:
+  scraper_data:

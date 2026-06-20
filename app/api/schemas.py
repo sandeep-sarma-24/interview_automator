@@ -66,3 +66,8 @@ class PreferenceSet(BaseModel):
 
 class ManualUrl(BaseModel):
     url: str
+
+
+class VerdictRequest(BaseModel):
+    verdict: str  # INTERESTED | NOT_INTERESTED | BOOKMARK | WRONG_MATCH
+    note: Optional[str] = None

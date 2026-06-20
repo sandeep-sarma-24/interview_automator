@@ -11,6 +11,7 @@ import signal
 import time
 from typing import Optional
 
+from app.core import health
 from app.core.backup import run_backup
 from app.core.locks import ResourceBusy, heavy_resource_lock
 from app.discovery import service as discovery_service
@@ -30,6 +31,7 @@ def _handle_signal(signum, frame) -> None:  # noqa: ANN001
 def run_cycle(do_backup: bool = False) -> None:
     """One serialized cycle. Each step is fail-isolated so one error doesn't
     abort the rest (graceful degradation)."""
+    health.write_heartbeat()  # alive at cycle start
     try:
         with heavy_resource_lock():
             try:
@@ -55,11 +57,14 @@ def run_cycle(do_backup: bool = False) -> None:
                     log.exception("backup failed")
     except ResourceBusy:
         log.warning("heavy resource busy; skipping this cycle")
+    finally:
+        health.write_heartbeat()  # alive at cycle end (covers long cycles)
 
 
 def run_worker(interval_seconds: int = 1800, once: bool = False) -> None:
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
+    health.write_heartbeat()  # immediate freshness on boot
     log.info("worker started (interval=%ss, once=%s)", interval_seconds, once)
     last_backup_day: Optional[str] = None
 

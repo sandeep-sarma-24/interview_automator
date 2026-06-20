@@ -9,7 +9,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.api import schemas
 from app.api.auth import get_current_candidate
@@ -25,8 +25,13 @@ router = APIRouter()
 
 # ─────────────────────────────── health ───────────────────────────────────
 @router.get("/health")
-def health() -> Dict[str, Any]:
-    return {"status": "ok"}
+def health(response: Response) -> Dict[str, Any]:
+    """Liveness + DB accessibility. 200 when the DB answers, 503 otherwise."""
+    from app.core.health import db_ok
+    if not db_ok():
+        response.status_code = 503
+        return {"status": "degraded", "db": "unreachable"}
+    return {"status": "ok", "db": "ok"}
 
 
 # ───────────────────────── onboarding wizard ──────────────────────────────
@@ -95,10 +100,13 @@ def list_preferences(cand: Dict[str, Any] = Depends(get_current_candidate)) -> L
 def feed(cand: Dict[str, Any] = Depends(get_current_candidate),
          states: Optional[str] = Query(default="SHORTLISTED,SCORED"),
          search: Optional[str] = None,
-         limit: int = Query(default=100, le=500)) -> List[Dict[str, Any]]:
+         limit: int = Query(default=50, le=500),
+         offset: int = Query(default=0, ge=0)) -> Dict[str, Any]:
     state_list = [s.strip() for s in states.split(",")] if states else None
     with transaction() as conn:
-        return score_repo.ranked_applications(conn, cand["id"], state_list, search, limit)
+        items = score_repo.ranked_applications(conn, cand["id"], state_list, search, limit, offset)
+        total = score_repo.count_applications(conn, cand["id"], state_list, search)
+    return {"total": total, "limit": limit, "offset": offset, "items": items}
 
 
 @router.get("/applications/{application_id}")
@@ -110,6 +118,35 @@ def application_detail(application_id: int,
             raise HTTPException(status_code=404, detail="Application not found")
         app["signals"] = score_repo.get_signals(conn, application_id)
     return app
+
+
+_VALID_VERDICTS = ("INTERESTED", "NOT_INTERESTED", "BOOKMARK", "WRONG_MATCH")
+
+
+@router.post("/applications/{application_id}/verdict")
+def set_verdict(application_id: int, body: schemas.VerdictRequest,
+                cand: Dict[str, Any] = Depends(get_current_candidate)) -> Dict[str, Any]:
+    """Human triage verdict (drives the state machine; note persisted)."""
+    if body.verdict not in _VALID_VERDICTS:
+        raise HTTPException(status_code=422, detail=f"verdict must be one of {_VALID_VERDICTS}")
+    with transaction() as conn:
+        result = score_repo.set_verdict(conn, cand["id"], application_id, body.verdict, body.note)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return result
+
+
+@router.get("/summary")
+def summary(cand: Dict[str, Any] = Depends(get_current_candidate)) -> Dict[str, Any]:
+    with transaction() as conn:
+        return score_repo.summary_counts(conn, cand["id"])
+
+
+@router.get("/diagnostics")
+def diagnostics(cand: Dict[str, Any] = Depends(get_current_candidate)) -> Dict[str, Any]:
+    from app.repositories import registry as reg
+    with transaction() as conn:
+        return reg.diagnostics(conn)
 
 
 # ─────────────────────── manual discovery + actions ───────────────────────

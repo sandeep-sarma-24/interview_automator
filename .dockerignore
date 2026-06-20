@@ -1,0 +1,18 @@
+# Build-context excludes. NOTE: *.md is intentionally NOT ignored — README.md /
+# DEPLOY.md are useful inside the image for debugging and cost almost nothing.
+.venv/
+venv/
+data/
+secrets/
+.git/
+.gitignore
+__pycache__/
+**/__pycache__/
+*.pyc
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.pytest_cache/
+.env
+tests/
+.DS_Store

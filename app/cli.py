@@ -29,6 +29,33 @@ def cmd_migrate(_args) -> None:  # noqa: ANN001
     _print({"status": "ok", "db": str(get_settings().db_path)})
 
 
+def cmd_init(_args) -> None:  # noqa: ANN001
+    """First-boot, offline-safe: schema/migrations + mandatory ATS platform rows.
+
+    Idempotent. Does NOT seed the company universe (that is a deliberate,
+    network-dependent manual step: `seed-companies`)."""
+    from app.db.connection import apply_schema
+    from app.discovery.ats.seed import seed_platforms
+    apply_schema()
+    seed_platforms()
+    _print({"status": "ok", "db": str(get_settings().db_path), "platforms_seeded": True})
+
+
+def cmd_healthcheck(args) -> None:  # noqa: ANN001
+    """Exit 0 healthy / 1 unhealthy. Used by container HEALTHCHECK."""
+    from app.core import health
+    detail = {"db": "ok" if health.db_ok() else "unreachable"}
+    healthy = detail["db"] == "ok"
+    if args.worker:
+        age = health.heartbeat_age_seconds()
+        fresh = age is not None and age <= args.max_age
+        detail["heartbeat_age_s"] = round(age, 1) if age is not None else None
+        detail["heartbeat_fresh"] = fresh
+        healthy = healthy and fresh
+    print(json.dumps(detail))
+    sys.exit(0 if healthy else 1)
+
+
 def cmd_seed(_args) -> None:  # noqa: ANN001
     from app.db.connection import apply_schema, transaction
     from app.repositories import candidates as C, jobs as J, preferences as P
@@ -128,8 +155,16 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     sub.add_parser("migrate").set_defaults(func=cmd_migrate)
+    sub.add_parser("init").set_defaults(func=cmd_init)
     sub.add_parser("seed").set_defaults(func=cmd_seed)
     sub.add_parser("discover").set_defaults(func=cmd_discover)
+
+    hc = sub.add_parser("healthcheck")
+    hc.add_argument("--worker", action="store_true",
+                    help="also require a fresh worker heartbeat")
+    hc.add_argument("--max-age", type=float, default=4000.0,
+                    help="max heartbeat age in seconds before unhealthy")
+    hc.set_defaults(func=cmd_healthcheck)
 
     scs = sub.add_parser("seed-companies")
     scs.add_argument("--no-verify", action="store_true",

@@ -1,6 +1,5 @@
-"""Sprint 1 smoke tests: onboarding -> discovery -> scoring -> feed, isolation,
-graceful degradation (Ollama down), and the trajectory inversion that is the
-whole point of the system.
+"""Sprint 1 smoke tests (under the /api prefix): onboarding -> discovery ->
+scoring -> feed, isolation, graceful degradation, and the trajectory inversion.
 """
 from __future__ import annotations
 
@@ -12,10 +11,10 @@ client = TestClient(app)
 
 
 def _onboard(email: str) -> dict:
-    tok = client.post("/candidates",
+    tok = client.post("/api/candidates",
                       json={"display_name": email, "email": email}).json()["api_token"]
     h = {"X-Candidate-Token": tok}
-    client.post("/onboarding/profile", headers=h, json={
+    client.post("/api/onboarding/profile", headers=h, json={
         "total_experience_months": 48,
         "core_skills": ["python", "backend", "payments"],
         "acquiring_skills": ["llm", "ml", "ai product"],
@@ -45,49 +44,103 @@ def _seed_jobs() -> None:
                 "signal_density": "RICH"})
 
 
+def test_root_health():
+    assert client.get("/health").status_code == 200          # Docker liveness at root
+    assert client.get("/api/health").status_code == 200      # SPA-facing
+
+
 def test_auth_required():
-    assert client.get("/me").status_code == 401
-    assert client.get("/feed", headers={"X-Candidate-Token": "bogus"}).status_code == 401
+    assert client.get("/api/me").status_code == 401
+    assert client.get("/api/feed", headers={"X-Candidate-Token": "bogus"}).status_code == 401
 
 
 def test_trajectory_inversion_and_blocked():
     h = _onboard("mohit@test")
-    client.post("/preferences", headers=h, json={"company": "Infosys", "preference": "BLOCKED"})
+    client.post("/api/preferences", headers=h, json={"company": "Infosys", "preference": "BLOCKED"})
     _seed_jobs()
-    report = client.post("/actions/score", headers=h).json()
+    report = client.post("/api/actions/score", headers=h).json()
     assert report["candidates"]["mohit@test"]["status"] == "ok"
 
-    feed = client.get("/feed", headers=h, params={"states": "SHORTLISTED,SCORED"}).json()
-    by_title = {r["title"]: r for r in feed}
+    feed = client.get("/api/feed", headers=h, params={"states": "SHORTLISTED,SCORED"}).json()
+    assert "items" in feed and "total" in feed
+    by_title = {r["title"]: r for r in feed["items"]}
 
     ai = by_title["AI Product Engineer"]      # Datadog (Infosys one is blocked)
     qa = by_title["Senior QA Automation Lead"]
-    # The inversion: the AI leap outranks the higher-experience-match QA lead.
     assert ai["total_score"] > qa["total_score"]
     assert ai["trajectory_direction"] == "LEAP"
     assert ai["current_state"] == "SHORTLISTED"
     assert qa["trajectory_direction"] == "BACKWARD"
 
-    # BLOCKED company is hard-filtered even though it's an AI leap.
-    rejected = client.get("/feed", headers=h, params={"states": "REJECTED"}).json()
+    rejected = client.get("/api/feed", headers=h, params={"states": "REJECTED"}).json()["items"]
     assert any(r["company"].lower().startswith("infosys") for r in rejected)
+
+
+def test_verdict_drives_state_and_summary():
+    h = _onboard("verdict@test")
+    _seed_jobs()
+    client.post("/api/actions/score", headers=h)
+    feed = client.get("/api/feed", headers=h, params={"states": "SHORTLISTED"}).json()["items"]
+    assert feed
+    aid = feed[0]["application_id"]
+
+    # INTERESTED -> AWAITING_REVIEW, note persisted + returned
+    r = client.post(f"/api/applications/{aid}/verdict", headers=h,
+                    json={"verdict": "INTERESTED", "note": "great fit"}).json()
+    assert r["current_state"] == "AWAITING_REVIEW" and r["verdict_note"] == "great fit"
+    detail = client.get(f"/api/applications/{aid}", headers=h).json()
+    assert detail["verdict"] == "INTERESTED" and detail["verdict_note"] == "great fit"
+
+    # WRONG_MATCH -> REJECTED (calibration signal)
+    other = client.get("/api/feed", headers=h, params={"states": "SHORTLISTED,SCORED"}).json()["items"]
+    wid = next(x["application_id"] for x in other if x["application_id"] != aid)
+    rw = client.post(f"/api/applications/{wid}/verdict", headers=h,
+                     json={"verdict": "WRONG_MATCH"}).json()
+    assert rw["current_state"] == "REJECTED"
+
+    # bad verdict -> 422
+    assert client.post(f"/api/applications/{aid}/verdict", headers=h,
+                       json={"verdict": "NOPE"}).status_code == 422
+
+    s = client.get("/api/summary", headers=h).json()
+    assert s["interested"] >= 1 and s["wrong_match"] >= 1
+    assert s["by_state"].get("AWAITING_REVIEW", 0) >= 1
+
+
+def test_diagnostics_shape():
+    h = _onboard("diag@test")
+    d = client.get("/api/diagnostics", headers=h).json()
+    assert "sources" in d and "totals" in d and "recent_runs" in d
+    keys = {s["source"] for s in d["sources"]}
+    assert {"GREENHOUSE", "LEVER", "EMAIL", "MANUAL"}.issubset(keys)
+
+
+def test_feed_pagination():
+    h = _onboard("page@test")
+    _seed_jobs()
+    client.post("/api/actions/score", headers=h)
+    page = client.get("/api/feed", headers=h,
+                      params={"states": "SHORTLISTED,SCORED", "limit": 1, "offset": 0}).json()
+    assert page["limit"] == 1 and len(page["items"]) <= 1 and page["total"] >= 1
 
 
 def test_isolation():
     h1 = _onboard("a@test")
     _seed_jobs()
-    client.post("/actions/score", headers=h1)
-    feed = client.get("/feed", headers=h1).json()
+    client.post("/api/actions/score", headers=h1)
+    feed = client.get("/api/feed", headers=h1).json()["items"]
     assert feed
     app_id = feed[0]["application_id"]
 
     h2 = _onboard("b@test")
-    assert client.get(f"/applications/{app_id}", headers=h2).status_code == 404
+    assert client.get(f"/api/applications/{app_id}", headers=h2).status_code == 404
+    assert client.post(f"/api/applications/{app_id}/verdict", headers=h2,
+                       json={"verdict": "INTERESTED"}).status_code == 404
 
 
 def test_manual_discovery_and_dedup():
     h = _onboard("c@test")
-    r1 = client.post("/jobs/manual", headers=h, json={"url": "http://localhost:9/x-role"}).json()
-    r2 = client.post("/jobs/manual", headers=h, json={"url": "http://localhost:9/x-role?utm=1"}).json()
+    r1 = client.post("/api/jobs/manual", headers=h, json={"url": "http://localhost:9/x-role"}).json()
+    r2 = client.post("/api/jobs/manual", headers=h, json={"url": "http://localhost:9/x-role?utm=1"}).json()
     assert r1["created"] == 1
     assert r2["created"] == 0 and r2["seen"] == 1  # canonical-URL dedup

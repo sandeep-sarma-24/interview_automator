@@ -1,0 +1,23 @@
+# Development override. Mounts source for hot reload.
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# - api runs uvicorn --reload watching the bind-mounted ./app
+# - worker uses a short cycle for fast feedback and picks up code on restart
+# - source is mounted read-only into the image's /app/app
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      ["python", "-m", "uvicorn", "app.api.app:app",
+       "--host", "0.0.0.0", "--port", "8765", "--reload", "--reload-dir", "/app/app"]
+    volumes:
+      - "scraper_data:/data"
+      - "./app:/app/app:ro"
+
+  worker:
+    command: ["python", "-m", "app.cli", "worker", "--interval", "120"]
+    volumes:
+      - "scraper_data:/data"
+      - "./app:/app/app:ro"

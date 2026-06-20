@@ -164,6 +164,9 @@ CREATE TABLE IF NOT EXISTS application (
     priority_score     REAL,                        -- denormalized current total for ranking
     employer_outcome   TEXT    NOT NULL DEFAULT 'NONE'
                           CHECK (employer_outcome IN ('NONE','ACKED','REJECTED','INTERVIEW','OFFER')),
+    verdict            TEXT,   -- M3 human triage: INTERESTED|NOT_INTERESTED|BOOKMARK|WRONG_MATCH
+    verdict_note       TEXT,
+    verdict_at         TEXT,
     created_at         TEXT    NOT NULL,
     updated_at         TEXT,
     deleted_at         TEXT,

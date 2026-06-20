@@ -21,7 +21,16 @@ logging.basicConfig(level=logging.INFO,
 def create_app() -> FastAPI:
     app = FastAPI(title="Job Discovery & Application Copilot", version=__version__)
     apply_schema()  # idempotent; ensures tables exist regardless of lifespan
-    app.include_router(router)
+
+    # API under /api (root is reserved for the M3 SPA, served later by the deploy layer).
+    app.include_router(router, prefix="/api")
+
+    # Root-level liveness for the container HEALTHCHECK (docker/healthcheck-api.sh).
+    @app.get("/health")
+    def root_health() -> dict:
+        from app.core.health import db_ok
+        return {"status": "ok" if db_ok() else "degraded"}
+
     return app
 
 

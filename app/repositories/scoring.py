@@ -72,34 +72,102 @@ def write_score(conn: sqlite3.Connection, application_id: int, result: Dict[str,
     return score_id  # type: ignore[return-value]
 
 
+def _feed_where(candidate_id: int, states: Optional[List[str]],
+                search: Optional[str]) -> Any:
+    clause = " WHERE a.candidate_id=? AND a.deleted_at IS NULL"
+    params: List[Any] = [candidate_id]
+    if states:
+        clause += " AND a.current_state IN (%s)" % ",".join("?" for _ in states)
+        params += states
+    if search:
+        clause += " AND (j.title LIKE ? OR c.name LIKE ?)"
+        like = f"%{search}%"
+        params += [like, like]
+    return clause, params
+
+
 def ranked_applications(conn: sqlite3.Connection, candidate_id: int,
                         states: Optional[List[str]] = None,
                         search: Optional[str] = None,
-                        limit: int = 100) -> List[Dict[str, Any]]:
-    """Ranked feed for the (future) dashboard: applications + job + current score."""
+                        limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+    """Ranked feed: applications + job + current score, paginated."""
+    where, params = _feed_where(candidate_id, states, search)
     q = (
         "SELECT a.id AS application_id, a.current_state, a.reason_code, a.priority_score, "
-        "j.title, j.location, j.is_remote, j.source, j.source_url, c.name AS company, "
+        "a.verdict, j.title, j.location, j.is_remote, j.source, j.source_url, c.name AS company, "
         "s.trajectory_direction, s.total_score, s.confidence, s.leap_override, "
-        "s.explanation_summary "
+        "s.signal_density, s.explanation_summary "
         "FROM application a "
         "JOIN job j ON j.id=a.job_id "
         "JOIN company c ON c.id=j.company_id "
-        "LEFT JOIN application_score s ON s.application_id=a.id AND s.is_current=1 "
-        "WHERE a.candidate_id=? AND a.deleted_at IS NULL"
+        "LEFT JOIN application_score s ON s.application_id=a.id AND s.is_current=1"
+        + where
+        + " ORDER BY a.priority_score DESC NULLS LAST, a.id DESC LIMIT ? OFFSET ?"
     )
-    params: List[Any] = [candidate_id]
-    if states:
-        q += " AND a.current_state IN (%s)" % ",".join("?" for _ in states)
-        params += states
-    if search:
-        q += " AND (j.title LIKE ? OR c.name LIKE ?)"
-        like = f"%{search}%"
-        params += [like, like]
-    q += " ORDER BY a.priority_score DESC NULLS LAST, a.id DESC LIMIT ?"
-    params.append(limit)
-    rows = conn.execute(q, params).fetchall()
+    rows = conn.execute(q, params + [limit, offset]).fetchall()
     return [dict(r) for r in rows]
+
+
+def count_applications(conn: sqlite3.Connection, candidate_id: int,
+                       states: Optional[List[str]] = None,
+                       search: Optional[str] = None) -> int:
+    where, params = _feed_where(candidate_id, states, search)
+    q = ("SELECT COUNT(*) FROM application a JOIN job j ON j.id=a.job_id "
+         "JOIN company c ON c.id=j.company_id" + where)
+    return int(conn.execute(q, params).fetchone()[0])
+
+
+# Verdict -> (state, reason). BOOKMARK intentionally absent (no transition).
+_VERDICT_TRANSITION = {
+    "INTERESTED": ("AWAITING_REVIEW", None),
+    "NOT_INTERESTED": ("REJECTED", "USER_DECLINED"),
+    "WRONG_MATCH": ("REJECTED", "WRONG_MATCH"),
+}
+
+
+def set_verdict(conn: sqlite3.Connection, candidate_id: int, application_id: int,
+                verdict: str, note: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Persist a human triage verdict (+note) and drive the state machine.
+    Returns None if the application is not owned by this candidate."""
+    row = conn.execute(
+        "SELECT current_state FROM application WHERE id=? AND candidate_id=? AND deleted_at IS NULL",
+        (application_id, candidate_id)).fetchone()
+    if not row:
+        return None
+    conn.execute("UPDATE application SET verdict=?, verdict_note=?, verdict_at=? WHERE id=?",
+                 (verdict, note, util.now_iso(), application_id))
+    current = row["current_state"]
+    if verdict in _VERDICT_TRANSITION:
+        to_state, reason = _VERDICT_TRANSITION[verdict]
+        transition(conn, application_id, to_state, reason or f"verdict:{verdict}", actor="CANDIDATE")
+        current = to_state
+    return {"application_id": application_id, "verdict": verdict,
+            "verdict_note": note, "current_state": current}
+
+
+def summary_counts(conn: sqlite3.Connection, candidate_id: int) -> Dict[str, Any]:
+    by_state = {r["current_state"]: r["n"] for r in conn.execute(
+        "SELECT current_state, COUNT(*) AS n FROM application "
+        "WHERE candidate_id=? AND deleted_at IS NULL GROUP BY current_state", (candidate_id,))}
+    leaps = conn.execute(
+        "SELECT COUNT(*) FROM application a JOIN application_score s "
+        "ON s.application_id=a.id AND s.is_current=1 "
+        "WHERE a.candidate_id=? AND s.leap_override=1 AND a.deleted_at IS NULL",
+        (candidate_id,)).fetchone()[0]
+    verdicts = {r["verdict"]: r["n"] for r in conn.execute(
+        "SELECT verdict, COUNT(*) AS n FROM application WHERE candidate_id=? "
+        "AND verdict IS NOT NULL AND deleted_at IS NULL GROUP BY verdict", (candidate_id,))}
+    last_job = conn.execute("SELECT MAX(discovered_at) FROM job").fetchone()[0]
+    last_run = conn.execute("SELECT MAX(finished_at) FROM discovery_run").fetchone()[0]
+    last_discovery = max([x for x in (last_job, last_run) if x], default=None)
+    return {
+        "by_state": by_state, "leaps": leaps,
+        "interested": verdicts.get("INTERESTED", 0),
+        "not_interested": verdicts.get("NOT_INTERESTED", 0),
+        "bookmarked": verdicts.get("BOOKMARK", 0),
+        "wrong_match": verdicts.get("WRONG_MATCH", 0),
+        "last_discovery_at": last_discovery,
+    }
 
 
 def get_application_for_candidate(conn: sqlite3.Connection, candidate_id: int,
@@ -107,6 +175,7 @@ def get_application_for_candidate(conn: sqlite3.Connection, candidate_id: int,
     """Ownership-scoped single application + job + current score (or None)."""
     row = conn.execute(
         "SELECT a.id AS application_id, a.current_state, a.reason_code, a.priority_score, "
+        "a.verdict, a.verdict_note, "
         "j.title, j.description_text, j.location, j.is_remote, j.source, j.source_url, "
         "c.name AS company, s.trajectory_direction, s.total_score, s.confidence, "
         "s.leap_override, s.signal_density, s.explanation_summary, s.scoring_model_version "

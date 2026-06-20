@@ -134,6 +134,60 @@ def log_run(conn: sqlite3.Connection, cats_id: int, status: str, started_at: str
          jobs_closed, jobs_dropped, nbytes, error))
 
 
+def diagnostics(conn: sqlite3.Connection) -> Dict[str, Any]:
+    """Per-source discovery health for the Diagnostics screen (global, not per-candidate)."""
+    sources: List[Dict[str, Any]] = []
+    for key in ("GREENHOUSE", "LEVER"):
+        prow = conn.execute("SELECT id FROM ats_platform WHERE key=?", (key,)).fetchone()
+        if not prow:
+            continue
+        pid = prow["id"]
+        agg = conn.execute(
+            "SELECT COUNT(*) AS total, "
+            "SUM(is_active) AS active, "
+            "SUM(CASE WHEN health_status='HEALTHY' THEN 1 ELSE 0 END) AS healthy, "
+            "SUM(CASE WHEN health_status='DEGRADED' THEN 1 ELSE 0 END) AS degraded, "
+            "SUM(CASE WHEN health_status='BROKEN' THEN 1 ELSE 0 END) AS broken, "
+            "MAX(last_success_at) AS last_sync "
+            "FROM company_ats WHERE ats_platform_id=?", (pid,)).fetchone()
+        jobs = conn.execute("SELECT COUNT(*) FROM job WHERE source='API' AND source_ref=?",
+                            (key,)).fetchone()[0]
+        failed = conn.execute(
+            "SELECT COUNT(*) FROM discovery_run dr JOIN company_ats ca ON ca.id=dr.company_ats_id "
+            "WHERE ca.ats_platform_id=? AND dr.status='ERROR'", (pid,)).fetchone()[0]
+        broken = agg["broken"] or 0
+        degraded = agg["degraded"] or 0
+        status = "ERROR" if broken > 0 else ("DEGRADED" if degraded > 0 else "OK")
+        sources.append({
+            "source": key, "type": "ATS", "active_boards": agg["active"] or 0,
+            "healthy": agg["healthy"] or 0, "degraded": degraded, "broken": broken,
+            "last_sync": agg["last_sync"], "jobs_discovered": jobs, "jobs_failed": failed,
+            "status": status})
+
+    for src in ("EMAIL", "MANUAL"):
+        r = conn.execute("SELECT COUNT(*) AS n, MAX(last_seen_at) AS last FROM job WHERE source=?",
+                         (src,)).fetchone()
+        sources.append({
+            "source": src, "type": src, "active_boards": None, "last_sync": r["last"],
+            "jobs_discovered": r["n"], "jobs_failed": 0,
+            "status": "OK" if r["n"] else "IDLE"})
+
+    recent = [dict(r) for r in conn.execute(
+        "SELECT c.name AS company, p.key AS platform, dr.status, dr.jobs_new, dr.jobs_dropped, "
+        "dr.error, dr.started_at FROM discovery_run dr "
+        "JOIN company_ats ca ON ca.id=dr.company_ats_id "
+        "JOIN company c ON c.id=ca.company_id "
+        "JOIN ats_platform p ON p.id=ca.ats_platform_id "
+        "ORDER BY dr.started_at DESC LIMIT 20")]
+
+    totals = {
+        "companies_active": conn.execute("SELECT COUNT(*) FROM company_ats WHERE is_active=1").fetchone()[0],
+        "companies_disabled": conn.execute("SELECT COUNT(*) FROM company_ats WHERE is_active=0").fetchone()[0],
+        "jobs_total": conn.execute("SELECT COUNT(*) FROM job").fetchone()[0],
+    }
+    return {"sources": sources, "recent_runs": recent, "totals": totals}
+
+
 def registry_summary(conn: sqlite3.Connection) -> Dict[str, Any]:
     rows = conn.execute(
         "SELECT p.key AS platform, ca.health_status, ca.is_active, COUNT(*) AS n "

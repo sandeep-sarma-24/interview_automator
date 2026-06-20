@@ -50,6 +50,9 @@ def transaction(db_path: Optional[Path] = None) -> Iterator[sqlite3.Connection]:
 _COLUMN_MIGRATIONS = [
     ("job", "role_class", "TEXT"),
     ("job", "content_key", "TEXT"),
+    ("application", "verdict", "TEXT"),
+    ("application", "verdict_note", "TEXT"),
+    ("application", "verdict_at", "TEXT"),
 ]
 
 
