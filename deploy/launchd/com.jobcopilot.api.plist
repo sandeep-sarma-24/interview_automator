@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- API service (mobile dashboard / read model). Bind to the Tailscale or
+     loopback interface via .env (SCRAPER_API_HOST), never 0.0.0.0.
+     Install: cp to ~/Library/LaunchAgents/ then `launchctl load` it.
+     Edit the absolute paths below to match your checkout. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jobcopilot.api</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/mohit.kumar/Scraper</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/mohit.kumar/Scraper/.venv/bin/python</string>
+        <string>-m</string>
+        <string>app.cli</string>
+        <string>serve</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>SCRAPER_BASE_DIR</key>
+        <string>/Users/mohit.kumar/Scraper/data</string>
+    </dict>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/mohit.kumar/Scraper/data/api.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mohit.kumar/Scraper/data/api.err.log</string>
+</dict>
+</plist>

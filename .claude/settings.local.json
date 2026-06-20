@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m venv .venv)",
+      "Bash(.venv/bin/python -m pip install --quiet --upgrade pip)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/python -c \"import fastapi, pydantic_settings, httpx, bs4, numpy, googleapiclient; print\\('imports ok'\\)\")",
+      "Bash(mktemp -d)",
+      "Bash(SCRAPER_BASE_DIR=__CMDSUB_OUTPUT__ .venv/bin/python -c ' *)",
+      "Bash(.venv/bin/python -m pytest tests/ -q)",
+      "Bash(.venv/bin/python *)"
+    ]
+  }
+}

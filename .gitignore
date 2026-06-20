@@ -1,0 +1,20 @@
+# --- secrets & local state: NEVER commit ---
+.env
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+secrets/
+gmail_credentials.json
+gmail_token.json
+
+# --- python ---
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# --- os ---
+.DS_Store

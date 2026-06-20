@@ -1,0 +1,41 @@
+{
+  "_comment": "Coarse role classifier for M1.5 ingest. Edit freely (config-driven). Matching is case-insensitive substring on the normalized title. Precedence: soft_drop_phrases -> drop -> keep -> default.",
+  "default": "SOFT_DROP",
+  "soft_drop_phrases": [
+    "sales engineer", "solutions engineer", "solutions architect", "solution architect",
+    "solutions consultant", "customer engineer", "support engineer", "field engineer",
+    "implementation engineer", "developer advocate", "developer relations", "devrel",
+    "product manager", "product management", "group product", "technical program manager",
+    "program manager", "tpm", "product designer", "ux designer", "ui designer",
+    "ux researcher", "design engineer", "forward deployed", "technical account manager"
+  ],
+  "keep": [
+    "engineer", "engineering",
+    "software engineer", "software developer", "backend", "back end", "back-end",
+    "frontend", "front end", "front-end", "full stack", "fullstack", "full-stack",
+    "developer", "programmer", "sde", "swe", "platform engineer", "infrastructure",
+    "infra engineer", "devops", "site reliability", "sre", "systems engineer",
+    "data engineer", "machine learning", " ml ", "ml engineer", "ai engineer",
+    "applied scientist", "research engineer", "research scientist", "data scientist",
+    "security engineer", "security researcher", "mobile engineer", "ios engineer",
+    "android engineer", "engineering manager", "staff engineer", "principal engineer",
+    "architect", "qa engineer", "sdet", "test engineer", "embedded", "firmware",
+    "compiler", "distributed systems", "database engineer", "cloud engineer",
+    "network engineer", "performance engineer", "ml ops", "mlops", "computer vision",
+    "nlp", "llm", "deep learning"
+  ],
+  "drop": [
+    "account executive", "account manager", "sales", "business development", "bizdev",
+    "marketing", "growth marketing", "brand", "content writer", "copywriter",
+    "social media", "communications", "public relations", "recruiter", "recruiting",
+    "talent", "sourcer", "people operations", "human resources", " hr ", "hrbp",
+    "office manager", "office coordinator", "executive assistant", "administrative",
+    "receptionist", "facilities", "finance", "accountant", "accounting", "controller",
+    "bookkeeper", "payroll", "tax", "legal counsel", "paralegal", "attorney",
+    "customer success", "customer support", "customer service", "support specialist",
+    "operations manager", "supply chain", "logistics", "procurement", "warehouse",
+    "graphic designer", "brand designer", "video editor", "photographer",
+    "community manager", "partnerships", "partner manager", "revenue", "biz ops",
+    "chief", "vp ", "vice president", "president", "general counsel", "controller"
+  ]
+}

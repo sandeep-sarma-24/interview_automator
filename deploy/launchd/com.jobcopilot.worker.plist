@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 24x7 worker: serialized discovery -> scoring loop, plus a daily DB backup.
+     One worker only (the heavy-resource file lock enforces this).
+     Edit the absolute paths below to match your checkout. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jobcopilot.worker</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/mohit.kumar/Scraper</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/mohit.kumar/Scraper/.venv/bin/python</string>
+        <string>-m</string>
+        <string>app.cli</string>
+        <string>worker</string>
+        <string>--interval</string>
+        <string>1800</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>SCRAPER_BASE_DIR</key>
+        <string>/Users/mohit.kumar/Scraper/data</string>
+    </dict>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/mohit.kumar/Scraper/data/worker.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mohit.kumar/Scraper/data/worker.err.log</string>
+</dict>
+</plist>
