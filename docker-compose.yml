@@ -1,8 +1,9 @@
 # Production deployment. Single command:  docker compose up -d
 #
-#   init   -> migrate + seed ATS platform reference rows (offline, one-shot)
-#   api    -> uvicorn (FastAPI), published on 127.0.0.1:8765 only
-#   worker -> discovery -> scoring loop + daily backup (single instance)
+#   init     -> migrate + seed ATS platform reference rows (offline, one-shot)
+#   api      -> uvicorn (FastAPI), internal only (fronted by nginx)
+#   worker   -> discovery -> scoring loop + daily backup (single instance)
+#   frontend -> nginx: serves the React SPA + reverse-proxies /api to the api service
 #
 # Ollama runs on the HOST (not containerized). If it is down, scoring falls back
 # to token-overlap automatically — nothing here depends on Ollama being up.
@@ -55,7 +56,7 @@ services:
       - "scraper_data:/data"
     extra_hosts: *host-gateway
     ports:
-      - "127.0.0.1:${HOST_API_PORT:-8765}:8765"   # loopback only (Tailscale/dashboard later)
+      - "127.0.0.1:${HOST_API_PORT:-8765}:8765"   # direct API access (debugging / CLI)
     depends_on:
       init:
         condition: service_completed_successfully
@@ -90,6 +91,26 @@ services:
       start_period: 120s
     mem_limit: 768m
     mem_reservation: 256m
+    restart: unless-stopped
+    logging: *default-logging
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: job-copilot-frontend:latest
+    ports:
+      - "127.0.0.1:${HOST_FRONTEND_PORT:-3000}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 128m
     restart: unless-stopped
     logging: *default-logging
 

@@ -3,6 +3,7 @@
 #
 # - api runs uvicorn --reload watching the bind-mounted ./app
 # - worker uses a short cycle for fast feedback and picks up code on restart
+# - frontend runs vite dev server with HMR (replaces the nginx production image)
 # - source is mounted read-only into the image's /app/app
 services:
   api:
@@ -21,3 +22,29 @@ services:
     volumes:
       - "scraper_data:/data"
       - "./app:/app/app:ro"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: build                       # stop at the Node stage, skip nginx
+    image: job-copilot-frontend:dev
+    command: ["npx", "vite", "--host", "0.0.0.0", "--port", "5173"]
+    environment:
+      VITE_API_TARGET: http://api:8765
+    ports:
+      - "127.0.0.1:${HOST_FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - "./frontend/src:/app/src"
+      - "./frontend/index.html:/app/index.html"
+      - "./frontend/tailwind.config.js:/app/tailwind.config.js"
+      - "./frontend/postcss.config.js:/app/postcss.config.js"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5173/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

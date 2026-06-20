@@ -1,5 +1,6 @@
-# Build-context excludes. NOTE: *.md is intentionally NOT ignored — README.md /
-# DEPLOY.md are useful inside the image for debugging and cost almost nothing.
+# Build-context excludes for the BACKEND image. NOTE: *.md is intentionally NOT
+# ignored — README.md / DEPLOY.md are useful inside the image for debugging and
+# cost almost nothing. The frontend has its own Dockerfile + .dockerignore.
 .venv/
 venv/
 data/
@@ -16,3 +17,4 @@ __pycache__/
 .env
 tests/
 .DS_Store
+frontend/
