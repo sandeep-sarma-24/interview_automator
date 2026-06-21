@@ -27,11 +27,17 @@ class Settings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = 8765
 
+    # Operator dashboard auth (M4 P0). Unset => operator endpoints disabled (503).
+    ops_token: Optional[str] = None
+
     # Scoring / embeddings (M2)
     ollama_url: str = "http://localhost:11434"
     embedding_model: str = "nomic-embed-text"
     shortlist_threshold: float = 0.6
     experience_stretch_months: int = 24
+
+    # Role canonicalization (M4-P1). Cosine (mapped to 0..1) >= this assigns a canonical.
+    canonical_assign_threshold: float = 0.80
 
     # Gmail discovery (M1)
     gmail_credentials: Optional[Path] = None

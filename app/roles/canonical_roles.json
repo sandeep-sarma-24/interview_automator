@@ -1,0 +1,44 @@
+{
+  "_comment": "M4-P1 taxonomy — DELIBERATELY NARROW (8 roles) for our candidates' early-career technical paths. Precision over coverage. Everything outside these resolves UNRESOLVED by design. Do not expand without real candidate demand.",
+  "roles": [
+    {"key": "software_engineer_generic", "label": "Software Engineer (Generic)", "family": "SWE",
+     "description": "General software engineer with no specific domain signal.",
+     "related": ["backend_engineer", "full_stack_engineer"],
+     "aliases": ["software engineer", "software development engineer", "sde", "swe", "software developer", "programmer", "member of technical staff"]},
+
+    {"key": "backend_engineer", "label": "Backend Engineer", "family": "SWE",
+     "description": "Server-side services, APIs, databases, distributed systems (incl. Python).",
+     "related": ["software_engineer_generic", "full_stack_engineer", "data_engineer"],
+     "aliases": ["backend engineer", "backend developer", "backend software engineer", "server engineer", "api engineer", "services engineer", "python developer", "python engineer", "python software engineer", "backend python engineer"]},
+
+    {"key": "full_stack_engineer", "label": "Full Stack Engineer", "family": "SWE",
+     "description": "Both client and server.",
+     "related": ["backend_engineer", "software_engineer_generic"],
+     "aliases": ["full stack engineer", "fullstack engineer", "full stack developer", "fullstack developer"]},
+
+    {"key": "data_engineer", "label": "Data Engineer", "family": "Data",
+     "description": "Data pipelines, warehouses, ETL.",
+     "related": ["backend_engineer", "ml_engineer"],
+     "aliases": ["data engineer", "data platform engineer", "etl engineer", "analytics engineer", "big data engineer"]},
+
+    {"key": "ml_engineer", "label": "Machine Learning Engineer", "family": "AI",
+     "description": "ML systems: training, serving, MLOps.",
+     "related": ["ai_engineer", "data_engineer"],
+     "aliases": ["machine learning engineer", "ml engineer", "mlops engineer", "ml ops engineer", "deep learning engineer", "machine learning systems engineer"]},
+
+    {"key": "ai_engineer", "label": "AI Engineer (Applied AI / LLM)", "family": "AI",
+     "description": "LLM / RAG / agent application engineering.",
+     "related": ["ml_engineer", "ai_product_engineer"],
+     "aliases": ["ai engineer", "applied ai engineer", "applied ai", "llm engineer", "genai engineer", "generative ai engineer", "nlp engineer", "ai scientist", "applied ai architect"]},
+
+    {"key": "ai_product_engineer", "label": "AI Product Engineer", "family": "AI",
+     "description": "Building AI-powered product features.",
+     "related": ["ai_engineer", "full_stack_engineer", "backend_engineer"],
+     "aliases": ["ai product engineer", "ai product", "forward deployed engineer", "forward deployed ai engineer"]},
+
+    {"key": "program_project_manager", "label": "Program / Project Manager", "family": "Product",
+     "description": "Technical program / project management (a valid secondary path).",
+     "related": [],
+     "aliases": ["program manager", "technical program manager", "tpm", "project manager", "associate program manager", "junior program manager", "technical project manager"]}
+  ]
+}

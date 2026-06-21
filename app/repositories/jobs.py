@@ -135,7 +135,8 @@ def jobs_without_application(conn: sqlite3.Connection, candidate_id: int,
                              limit: int = 500) -> List[Dict[str, Any]]:
     """Jobs that have no application row for this candidate yet (need scoring)."""
     rows = conn.execute(
-        "SELECT j.* FROM job j "
+        "SELECT j.*, c.name AS company_name FROM job j "
+        "JOIN company c ON c.id=j.company_id "
         "LEFT JOIN application a ON a.job_id=j.id AND a.candidate_id=? "
         "WHERE a.id IS NULL AND j.ingestion_status NOT IN ('ARCHIVED','CLOSED') "
         "ORDER BY j.discovered_at DESC LIMIT ?",

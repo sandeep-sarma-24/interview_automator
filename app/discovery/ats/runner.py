@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app import util
+from app.core import telemetry
 from app.db.connection import transaction
 from app.discovery import normalize
 from app.discovery.ats.greenhouse import GreenhouseAdapter
@@ -33,28 +34,40 @@ _UA = "job-copilot-discovery/0.1 (+local-first; discovery-only; polite)"
 _MIN_REQUEST_SPACING = 0.6  # seconds between requests to the same ATS domain
 
 
-def _conditional_get(url: str, etag: Optional[str], last_modified: Optional[str]):
-    """Returns (status, body_bytes, etag, last_modified). Raises on network error."""
+def _conditional_get(service: str, url: str, etag: Optional[str], last_modified: Optional[str]):
+    """Returns (status, body_bytes, etag, last_modified). Raises on network error.
+    Records an api_call telemetry row either way (host+path only)."""
     headers = {"User-Agent": _UA, "Accept": "application/json"}
     if etag:
         headers["If-None-Match"] = etag
     if last_modified:
         headers["If-Modified-Since"] = last_modified
-    with httpx.Client(timeout=20.0, follow_redirects=True) as client:
-        r = client.get(url, headers=headers)
+    import time
+    start = time.monotonic()
+    try:
+        with httpx.Client(timeout=20.0, follow_redirects=True) as client:
+            r = client.get(url, headers=headers)
+    except Exception as e:
+        telemetry.record_api_call(service, "GET", url, status_code=None,
+                                  latency_ms=int((time.monotonic() - start) * 1000),
+                                  ok=False, error=type(e).__name__)
+        raise
+    telemetry.record_api_call(service, "GET", url, status_code=r.status_code,
+                              latency_ms=int((time.monotonic() - start) * 1000),
+                              ok=r.status_code in (200, 304))
     if r.status_code not in (200, 304):
         r.raise_for_status()
     return r.status_code, r.content, r.headers.get("ETag"), r.headers.get("Last-Modified")
 
 
 def _role_filter(jobs: List[NormalizedJob]):
-    """Apply KEEP/SOFT_DROP/DROP. Returns (kept, dropped_count)."""
+    """Apply KEEP/SOFT_DROP/DROP. Returns (kept, dropped_jobs)."""
     kept: List[NormalizedJob] = []
-    dropped = 0
+    dropped: List[NormalizedJob] = []
     for nj in jobs:
         rc = classify(nj.title)
         if not should_ingest(rc):
-            dropped += 1
+            dropped.append(nj)
             continue
         nj.role_class = rc
         kept.append(nj)
@@ -90,7 +103,7 @@ def run_company_discovery(platform_keys: Optional[List[str]] = None,
             jitter = random.randint(0, max(1, interval // 10))
             url = adapter.board_url(cats["board_token"], bool(cats["supports_full_description"]))
             try:
-                status, body, etag, lastmod = _conditional_get(url, cats["etag"],
+                status, body, etag, lastmod = _conditional_get(key, url, cats["etag"],
                                                                cats["last_modified"])
                 if status == 304:
                     with transaction() as conn:
@@ -112,16 +125,23 @@ def run_company_discovery(platform_keys: Optional[List[str]] = None,
                                        content_hash, jitter)
                     reg.log_run(conn, cats["id"], "OK", started, 200,
                                 jobs_seen=len(parsed), jobs_new=pj["created"],
-                                jobs_closed=closed, jobs_dropped=dropped, nbytes=len(body))
+                                jobs_closed=closed, jobs_dropped=len(dropped), nbytes=len(body))
+                # DROP inspection events (outside the transaction, per the telemetry rule)
+                for nj in dropped:
+                    telemetry.record_event("DISCOVERY", "DROP", source=key, message=nj.title,
+                                           metadata={"company": cats["company_name"],
+                                                     "title": nj.title, "reason": "ROLE_FILTER_DROP"})
                 pstats["created"] += pj["created"]
                 pstats["merged"] += pj.get("merged", 0)
                 pstats["closed"] += closed
-                pstats["dropped"] += dropped
+                pstats["dropped"] += len(dropped)
                 pstats["checked"] += 1
             except Exception as e:  # fail-isolated per company
                 with transaction() as conn:
                     res = reg.record_failure(conn, cats["id"], interval, type(e).__name__)
                     reg.log_run(conn, cats["id"], "ERROR", started, error=str(e)[:300])
+                telemetry.record_error("DISCOVERY", key, e,
+                                       context={"company": cats["company_name"]})
                 pstats["errors"] += 1
                 if res.get("disabled"):
                     pstats["disabled"] += 1
@@ -135,5 +155,6 @@ def run_company_discovery(platform_keys: Optional[List[str]] = None,
         for k in ("created", "merged", "closed", "dropped", "errors"):
             report[k] += pstats[k]
         report["checked"] += pstats["checked"]
+        telemetry.record_event("DISCOVERY", "discovery_complete", source=key, metadata=pstats)
         log.info("ATS %s: %s", key, pstats)
     return report

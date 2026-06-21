@@ -20,6 +20,7 @@ x-app-env: &app-env
   SCRAPER_EXPERIENCE_STRETCH_MONTHS: ${SCRAPER_EXPERIENCE_STRETCH_MONTHS:-24}
   SCRAPER_GMAIL_CREDENTIALS: ${SCRAPER_GMAIL_CREDENTIALS:-/data/secrets/gmail_credentials.json}
   SCRAPER_GMAIL_TOKEN: ${SCRAPER_GMAIL_TOKEN:-/data/secrets/gmail_token.json}
+  SCRAPER_OPS_TOKEN: ${SCRAPER_OPS_TOKEN:-}   # operator dashboard; unset => /api/ops disabled (503)
 
 x-build: &app-build
   context: .

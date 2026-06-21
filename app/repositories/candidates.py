@@ -101,6 +101,15 @@ def set_target_embedding(conn: sqlite3.Connection, pv_id: int, vector: List[floa
         (util.dumps(vector), model, pv_id))
 
 
+def set_canonical_roles(conn: sqlite3.Connection, pv_id: int,
+                        targets: List[str], avoids: List[str]) -> None:
+    """P1-C: persist resolved canonical target/avoid role keys on the profile version."""
+    conn.execute(
+        "UPDATE candidate_profile_version SET target_canonical_roles_json=?, "
+        "avoid_canonical_roles_json=? WHERE id=?",
+        (util.dumps(targets), util.dumps(avoids), pv_id))
+
+
 # ───────────────────────────────── resume ─────────────────────────────────
 def upsert_resume(conn: sqlite3.Connection, candidate_id: int, label: str,
                   target_role: Optional[str], content_text: Optional[str],

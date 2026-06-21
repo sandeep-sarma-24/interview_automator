@@ -2,8 +2,9 @@
 import os
 import tempfile
 
-# Set the base dir at collection time, before app.config is first read.
+# Set the base dir + ops token at collection time, before app.config is first read.
 os.environ["SCRAPER_BASE_DIR"] = tempfile.mkdtemp(prefix="jobcopilot-test-")
+os.environ.setdefault("SCRAPER_OPS_TOKEN", "test-ops-token")
 
 from app.config import get_settings  # noqa: E402
 

@@ -122,9 +122,36 @@ def cmd_manual(args) -> None:  # noqa: ANN001
     _print(add_manual_url(args.url))
 
 
+def cmd_seed_roles(args) -> None:  # noqa: ANN001
+    from app.db.connection import apply_schema
+    from app.roles.seed import seed_roles
+    apply_schema()
+    _print(seed_roles(embed=not args.no_embed, reset=args.reset))
+
+
+def cmd_embed_roles(_args) -> None:  # noqa: ANN001
+    from app.roles.seed import embed_roles
+    _print({"embedded": embed_roles()})
+
+
+def cmd_resolve_titles(args) -> None:  # noqa: ANN001
+    from app.db.connection import transaction
+    from app.roles.resolver import resolve_titles
+    with transaction() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT title FROM job ORDER BY discovered_at DESC LIMIT ?",
+            (args.limit,)).fetchall()
+    _print(resolve_titles([r["title"] for r in rows]))
+
+
 def cmd_score(args) -> None:  # noqa: ANN001
     from app.scoring.service import run_scoring
     _print(run_scoring(candidate_id=args.candidate))
+
+
+def cmd_rescore(args) -> None:  # noqa: ANN001
+    from app.scoring.service import rescore
+    _print(rescore(candidate_id=args.candidate))
 
 
 def cmd_worker(args) -> None:  # noqa: ANN001
@@ -144,6 +171,11 @@ def cmd_backup(_args) -> None:  # noqa: ANN001
     _print(run_backup())
 
 
+def cmd_prune(_args) -> None:  # noqa: ANN001
+    from app.core.telemetry import prune_telemetry
+    _print(prune_telemetry())
+
+
 def cmd_gmail_auth(_args) -> None:  # noqa: ANN001
     from app.discovery.email_gmail import authorize_interactive
     path = authorize_interactive()
@@ -158,6 +190,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init").set_defaults(func=cmd_init)
     sub.add_parser("seed").set_defaults(func=cmd_seed)
     sub.add_parser("discover").set_defaults(func=cmd_discover)
+
+    sr = sub.add_parser("seed-roles")
+    sr.add_argument("--no-embed", action="store_true", help="skip canonical embeddings")
+    sr.add_argument("--reset", action="store_true", help="wipe role tables before seeding")
+    sr.set_defaults(func=cmd_seed_roles)
+    sub.add_parser("embed-roles").set_defaults(func=cmd_embed_roles)
+    rt = sub.add_parser("resolve-titles")
+    rt.add_argument("--limit", type=int, default=5000)
+    rt.set_defaults(func=cmd_resolve_titles)
 
     hc = sub.add_parser("healthcheck")
     hc.add_argument("--worker", action="store_true",
@@ -182,6 +223,10 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--candidate", type=int, default=None)
     sc.set_defaults(func=cmd_score)
 
+    rs = sub.add_parser("rescore")  # re-score existing applications with rules-v2-canonical
+    rs.add_argument("--candidate", type=int, default=None)
+    rs.set_defaults(func=cmd_rescore)
+
     w = sub.add_parser("worker")
     w.add_argument("--interval", type=int, default=1800)
     w.add_argument("--once", action="store_true")
@@ -193,6 +238,7 @@ def build_parser() -> argparse.ArgumentParser:
     sv.set_defaults(func=cmd_serve)
 
     sub.add_parser("backup").set_defaults(func=cmd_backup)
+    sub.add_parser("prune").set_defaults(func=cmd_prune)
     sub.add_parser("gmail-auth").set_defaults(func=cmd_gmail_auth)
     return p
 

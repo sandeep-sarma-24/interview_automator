@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS candidate_profile_version (
     salary_target_multiplier REAL    NOT NULL DEFAULT 1.7,
     salary_stretch_multiplier REAL   NOT NULL DEFAULT 2.5,
     weights_json             TEXT    NOT NULL DEFAULT '{}',   -- dimension weights override
+    target_canonical_roles_json TEXT,                         -- P1-C: resolved canonical target keys (ordered; [0]=primary)
+    avoid_canonical_roles_json  TEXT,                         -- P1-C: resolved canonical avoid keys
     target_embedding_json    TEXT,                            -- cached target-profile vector
     target_embedding_model   TEXT,
     is_current               INTEGER NOT NULL DEFAULT 1 CHECK (is_current IN (0,1)),
@@ -301,3 +303,103 @@ CREATE TABLE IF NOT EXISTS discovery_run (
 
 CREATE INDEX IF NOT EXISTS ix_discovery_run_cats
     ON discovery_run (company_ats_id, started_at);
+
+-- ══════════════════════════ M4 P0 Observability ════════════════════════════
+-- Append-only telemetry. 30-day retention enforced by the worker / `cli prune`.
+-- Written ONLY by the fail-safe telemetry module on its own connection — never
+-- inside a business transaction.
+
+CREATE TABLE IF NOT EXISTS ops_event (
+    id            INTEGER PRIMARY KEY,
+    ts            TEXT NOT NULL,
+    level         TEXT NOT NULL CHECK (level IN ('DEBUG','INFO','WARN','ERROR')),
+    category      TEXT NOT NULL CHECK (category IN
+                    ('DISCOVERY','SCORING','EMBEDDING','WORKER','API','SYSTEM')),
+    source        TEXT,                       -- GREENHOUSE/LEVER/EMAIL/MANUAL/OLLAMA/SYSTEM
+    action        TEXT NOT NULL,              -- cycle_complete / discovery_complete / DROP / prune
+    message       TEXT,
+    entity_type   TEXT,
+    entity_id     INTEGER,
+    duration_ms   INTEGER,
+    metadata_json TEXT
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS ix_ops_event_ts     ON ops_event (ts);
+CREATE INDEX IF NOT EXISTS ix_ops_event_cat    ON ops_event (category, ts);
+CREATE INDEX IF NOT EXISTS ix_ops_event_level  ON ops_event (level, ts);
+CREATE INDEX IF NOT EXISTS ix_ops_event_action ON ops_event (category, action, ts);
+
+-- Outbound API call telemetry. NO query strings / tokens / secrets are stored.
+CREATE TABLE IF NOT EXISTS api_call (
+    id          INTEGER PRIMARY KEY,
+    ts          TEXT NOT NULL,
+    service     TEXT NOT NULL,                -- OLLAMA / GREENHOUSE / LEVER / HTTP
+    method      TEXT,
+    host        TEXT,                         -- netloc only
+    path        TEXT,                         -- path only (query stripped)
+    status_code INTEGER,
+    ok          INTEGER CHECK (ok IN (0,1)),
+    latency_ms  INTEGER,
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    error       TEXT
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS ix_api_call_ts      ON api_call (ts);
+CREATE INDEX IF NOT EXISTS ix_api_call_service ON api_call (service, ts);
+
+-- Deduplicated errors (grouped by hash; count increments on recurrence).
+CREATE TABLE IF NOT EXISTS error_event (
+    id           INTEGER PRIMARY KEY,
+    error_hash   TEXT NOT NULL UNIQUE,
+    category     TEXT,
+    source       TEXT,
+    error_type   TEXT,
+    message      TEXT,
+    stack_trace  TEXT,
+    context_json TEXT,
+    count        INTEGER NOT NULL DEFAULT 1,
+    first_seen   TEXT NOT NULL,
+    last_seen    TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS ix_error_last_seen ON error_event (last_seen);
+
+-- ═══════════════════════ M4-P1 Role Canonicalization ════════════════════════
+-- First slice: taxonomy + aliases + resolver cache. NOT yet consumed by scoring.
+
+CREATE TABLE IF NOT EXISTS canonical_role (
+    id                 INTEGER PRIMARY KEY,
+    key                TEXT NOT NULL UNIQUE,        -- e.g. backend_engineer
+    label              TEXT NOT NULL,
+    family             TEXT NOT NULL,               -- SWE/Infra/Data/AI/Quality/Security/Mgmt/Product
+    description        TEXT,
+    related_roles_json TEXT NOT NULL DEFAULT '[]',  -- adjacency graph (canonical keys)
+    embedding_json     TEXT,                        -- precomputed vector (nullable until embedded)
+    embedding_model    TEXT,
+    created_at         TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS role_alias (
+    id                INTEGER PRIMARY KEY,
+    canonical_role_id INTEGER NOT NULL REFERENCES canonical_role(id) ON DELETE CASCADE,
+    alias_text        TEXT NOT NULL,
+    normalized_alias  TEXT NOT NULL UNIQUE,         -- normalized + seniority-stripped
+    source            TEXT NOT NULL CHECK (source IN ('MANUAL','LEARNED')),
+    created_by        TEXT,                          -- SYSTEM | OPS | <future user id>
+    confidence        REAL,
+    created_at        TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS ix_role_alias_canon ON role_alias (canonical_role_id);
+
+CREATE TABLE IF NOT EXISTS role_match_cache (
+    id                INTEGER PRIMARY KEY,
+    title_hash        TEXT NOT NULL UNIQUE,          -- sha256(normalized title)
+    normalized_title  TEXT NOT NULL,
+    canonical_role_id INTEGER REFERENCES canonical_role(id) ON DELETE SET NULL,
+    method            TEXT NOT NULL CHECK (method IN ('ALIAS','EMBEDDING','UNRESOLVED')),
+    score             REAL,
+    resolved_at       TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS ix_role_cache_method ON role_match_cache (method);

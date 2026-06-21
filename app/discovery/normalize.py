@@ -62,6 +62,7 @@ def persist_jobs(conn: sqlite3.Connection, jobs: List[NormalizedJob]) -> Dict[st
     ATS), errors. Order of checks: exact dedup_hash -> cross-source merge -> insert.
     """
     created = seen = merged = errors = 0
+    duplicates: List[Dict[str, Any]] = []
     for nj in jobs:
         try:
             if not nj.title or not nj.company_name:
@@ -94,6 +95,7 @@ def persist_jobs(conn: sqlite3.Connection, jobs: List[NormalizedJob]) -> Dict[st
                 if not is_api and match["source"] == "API":
                     jobs_repo.bump_last_seen(conn, match["id"], ts)  # defer to ATS
                     seen += 1
+                    duplicates.append({"company": nj.company_name, "title": nj.title})
                     continue
                 # same-source content match -> fall through to insert (distinct req)
 
@@ -103,7 +105,8 @@ def persist_jobs(conn: sqlite3.Connection, jobs: List[NormalizedJob]) -> Dict[st
             created += 1
         except Exception:
             errors += 1
-    return {"created": created, "seen": seen, "merged": merged, "errors": errors}
+    return {"created": created, "seen": seen, "merged": merged, "errors": errors,
+            "duplicates": duplicates}
 
 
 def _job_data(nj: NormalizedJob, ck: str) -> Dict[str, Any]:

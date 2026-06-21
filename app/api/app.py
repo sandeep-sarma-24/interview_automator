@@ -11,6 +11,8 @@ import logging
 from fastapi import FastAPI
 
 from app import __version__
+from app.api.ops_routes import router as ops_router
+from app.api.roles_routes import router as roles_router
 from app.api.routes import router
 from app.db.connection import apply_schema
 
@@ -24,6 +26,8 @@ def create_app() -> FastAPI:
 
     # API under /api (root is reserved for the M3 SPA, served later by the deploy layer).
     app.include_router(router, prefix="/api")
+    app.include_router(ops_router, prefix="/api")    # operator dashboard -> /api/ops/*
+    app.include_router(roles_router, prefix="/api")  # role taxonomy -> /api/roles/*
 
     # Root-level liveness for the container HEALTHCHECK (docker/healthcheck-api.sh).
     @app.get("/health")

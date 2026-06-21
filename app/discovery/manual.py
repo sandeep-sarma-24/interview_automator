@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 import httpx
 from bs4 import BeautifulSoup
 
+from app.core import telemetry
 from app.discovery.base import NormalizedJob
 
 _UA = "job-copilot/0.1 (+local-first; respects robots)"
@@ -31,10 +32,15 @@ def fetch_url_job(url: str) -> NormalizedJob:
     description = None
     location = None
 
+    import time
+    start = time.monotonic()
     try:
         with httpx.Client(timeout=15.0, follow_redirects=True,
                           headers={"User-Agent": _UA}) as client:
             resp = client.get(url)
+            telemetry.record_api_call("HTTP", "GET", url, status_code=resp.status_code,
+                                      latency_ms=int((time.monotonic() - start) * 1000),
+                                      ok=resp.is_success)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "html.parser")
             title = (_meta(soup, "og:title")

@@ -5,6 +5,7 @@ import sqlite3
 from typing import Any, Dict, List, Optional
 
 from app import util
+from app.domain import DEFAULT_WEIGHTS
 
 
 def get_or_create_application(conn: sqlite3.Connection, candidate_id: int, job_id: int,
@@ -170,20 +171,70 @@ def summary_counts(conn: sqlite3.Connection, candidate_id: int) -> Dict[str, Any
     }
 
 
+# Shared column list for application-detail reads (candidate-scoped + global).
+_APP_SELECT = (
+    "SELECT a.id AS application_id, a.candidate_id, a.current_state, a.reason_code, "
+    "a.priority_score, a.verdict, a.verdict_note, "
+    "j.title, j.description_text, j.location, j.is_remote, j.source, j.source_url, "
+    "c.name AS company, s.trajectory_direction, s.total_score, s.confidence, "
+    "s.leap_override, s.signal_density, s.explanation_summary, s.scoring_model_version, "
+    "s.trajectory_score, s.skill_score, s.location_score, s.experience_score, "
+    "s.salary_fit_score, s.breakdown_json "
+    "FROM application a JOIN job j ON j.id=a.job_id JOIN company c ON c.id=j.company_id "
+    "LEFT JOIN application_score s ON s.application_id=a.id AND s.is_current=1 ")
+
+
 def get_application_for_candidate(conn: sqlite3.Connection, candidate_id: int,
                                   application_id: int) -> Optional[Dict[str, Any]]:
     """Ownership-scoped single application + job + current score (or None)."""
     row = conn.execute(
-        "SELECT a.id AS application_id, a.current_state, a.reason_code, a.priority_score, "
-        "a.verdict, a.verdict_note, "
-        "j.title, j.description_text, j.location, j.is_remote, j.source, j.source_url, "
-        "c.name AS company, s.trajectory_direction, s.total_score, s.confidence, "
-        "s.leap_override, s.signal_density, s.explanation_summary, s.scoring_model_version "
-        "FROM application a JOIN job j ON j.id=a.job_id JOIN company c ON c.id=j.company_id "
-        "LEFT JOIN application_score s ON s.application_id=a.id AND s.is_current=1 "
-        "WHERE a.id=? AND a.candidate_id=? AND a.deleted_at IS NULL",
+        _APP_SELECT + "WHERE a.id=? AND a.candidate_id=? AND a.deleted_at IS NULL",
         (application_id, candidate_id)).fetchone()
     return dict(row) if row else None
+
+
+def get_application_global(conn: sqlite3.Connection,
+                          application_id: int) -> Optional[Dict[str, Any]]:
+    """Operator view: any application, not candidate-scoped."""
+    row = conn.execute(_APP_SELECT + "WHERE a.id=? AND a.deleted_at IS NULL",
+                       (application_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def score_explanation(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Per-dimension contributions (score x weight) + derived company-preference
+    adjustment + final score. Pure read — no scoring logic runs here."""
+    breakdown = util.loads(row.get("breakdown_json"), {}) or {}
+    weights = breakdown.get("weights", dict(DEFAULT_WEIGHTS))
+    dim_scores = {
+        "trajectory": row.get("trajectory_score"),
+        "skills": row.get("skill_score"),
+        "location": row.get("location_score"),
+        "experience": row.get("experience_score"),
+        "salary": row.get("salary_fit_score"),
+    }
+    dimensions = {}
+    weighted_sum = 0.0
+    for key, score in dim_scores.items():
+        w = float(weights.get(key, 0.0) or 0.0)
+        contrib = (score or 0.0) * w
+        dimensions[key] = {"score": score, "weight": w, "contribution": round(contrib, 4)}
+        weighted_sum += contrib
+    total = row.get("total_score")
+    # total = clamp(weighted_sum + company_adjust); recover the adjustment by difference.
+    company_adjust = round(total - weighted_sum, 4) if total is not None else None
+    return {
+        "trajectory_direction": row.get("trajectory_direction"),
+        "dimensions": dimensions,
+        "weighted_sum": round(weighted_sum, 4),
+        "company_adjust": company_adjust,
+        "final_score": total,
+        "confidence": row.get("confidence"),
+        "signal_density": row.get("signal_density"),
+        "leap_override": row.get("leap_override"),
+        "embed_sim": breakdown.get("embed_sim"),
+        "scoring_model_version": row.get("scoring_model_version"),
+    }
 
 
 def get_signals(conn: sqlite3.Connection, application_id: int) -> List[Dict[str, Any]]:

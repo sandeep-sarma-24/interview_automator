@@ -227,13 +227,44 @@ def _s(stype: str, direction: str, label: str, detail: Optional[str] = None) -> 
     return {"signal_type": stype, "direction": direction, "label": label, "detail": detail}
 
 
+def canonical_trajectory(role_ctx: Dict[str, Any],
+                         embed_sim: float) -> Tuple[str, List[Dict[str, Any]]]:
+    """Trajectory direction from CANONICAL role relationship (P1-C).
+
+    role_ctx = {job_canonical, primary, targets:set, avoids:set, related:set, method}.
+    Same direction vocabulary + TRAJECTORY_SCORES as before — only the *input*
+    changes from substring matching to canonical-role matching.
+    """
+    jc = role_ctx["job_canonical"]
+    det = f"job role: {jc}"
+    if jc in role_ctx["avoids"]:
+        return "BACKWARD", [_s("TRAJECTORY", "NEGATIVE", "Backward move (away from your goal)", det)]
+    if jc == role_ctx["primary"]:
+        return "LEAP", [_s("TRAJECTORY", "POSITIVE", f"Strong move toward {jc}", det)]
+    if jc in role_ctx["targets"]:
+        return "FORWARD", [_s("TRAJECTORY", "POSITIVE", "Forward move (target role)", det)]
+    if jc in role_ctx["related"]:
+        return "FORWARD", [_s("TRAJECTORY", "POSITIVE", "Forward move (related role family)", det)]
+    if embed_sim >= 0.6:
+        return "LATERAL", [_s("TRAJECTORY", "NEUTRAL", "Lateral move", det)]
+    return "STALL", [_s("TRAJECTORY", "NEUTRAL", "Limited career movement", det)]
+
+
 def score_job(profile: Profile, job: Dict[str, Any], company_pref: Optional[str],
-              embed_sim: float, used_embeddings: bool) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+              embed_sim: float, used_embeddings: bool,
+              role_ctx: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     """Run Stage 2. Returns (result, signals). Assumes Stage 0 already passed."""
     title = util.normalize_text(job.get("title"))
     text = util.normalize_text(f"{job.get('title') or ''} {job.get('description_text') or ''}")
 
-    direction, t_sig = _trajectory(profile, title, text, embed_sim)
+    # Trajectory INPUT: canonical role match when the job title resolved; otherwise
+    # fall back to the legacy keyword path (preserves recall on unresolved titles).
+    if role_ctx and role_ctx.get("job_canonical"):
+        direction, t_sig = canonical_trajectory(role_ctx, embed_sim)
+        role_method = role_ctx.get("method", "CANONICAL")
+    else:
+        direction, t_sig = _trajectory(profile, title, text, embed_sim)
+        role_method = "FALLBACK"
     traj_score = TRAJECTORY_SCORES[direction]
     skill_score, sk_sig = _skills(profile, text, embed_sim)
     loc_score, loc_sig = _location(profile, job)
@@ -269,8 +300,15 @@ def score_job(profile: Profile, job: Dict[str, Any], company_pref: Optional[str]
         "confidence": round(confidence, 4),
         "signal_density": density,
         "leap_override": leap,
-        "scoring_model_version": "rules-v1+" + ("nomic-embed-text" if used_embeddings else "fallback"),
-        "breakdown": {"weights": w, "embed_sim": round(embed_sim, 4)},
+        "scoring_model_version": "rules-v2-canonical+" + ("nomic-embed-text" if used_embeddings else "fallback"),
+        "breakdown": {
+            "weights": w, "embed_sim": round(embed_sim, 4),
+            "role_match": {
+                "job_canonical": (role_ctx or {}).get("job_canonical"),
+                "method": role_method,            # ALIAS | EMBEDDING | FALLBACK
+                "direction": direction,
+            },
+        },
         "explanation_summary": build_summary(signals),
     }
     return result, signals

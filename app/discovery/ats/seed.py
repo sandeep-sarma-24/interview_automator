@@ -15,6 +15,7 @@ from typing import Any, Dict, List
 
 import httpx
 
+from app.core import telemetry
 from app.db.connection import transaction
 from app.discovery.ats.greenhouse import GreenhouseAdapter
 from app.discovery.ats.lever import LeverAdapter
@@ -54,15 +55,22 @@ def _verify_token(ats: str, token: str) -> Dict[str, Any]:
     """Probe the board once. Returns {ok, http, count}."""
     adapter = _ADAPTERS[ats]
     url = adapter.board_url(token, supports_full_description=False)
+    start = time.monotonic()
     try:
         with httpx.Client(timeout=15.0, follow_redirects=True,
                           headers={"User-Agent": _UA}) as client:
             r = client.get(url)
+        telemetry.record_api_call(ats, "GET", url, status_code=r.status_code,
+                                  latency_ms=int((time.monotonic() - start) * 1000),
+                                  ok=r.status_code == 200)
         if r.status_code != 200:
             return {"ok": False, "http": r.status_code, "count": 0}
         count = len(adapter.parse(r.content, {"company_name": ""}))
         return {"ok": True, "http": 200, "count": count}
     except Exception as e:  # noqa: BLE001
+        telemetry.record_api_call(ats, "GET", url, status_code=None,
+                                  latency_ms=int((time.monotonic() - start) * 1000),
+                                  ok=False, error=type(e).__name__)
         return {"ok": False, "http": "ERR:" + type(e).__name__, "count": 0}
 
 

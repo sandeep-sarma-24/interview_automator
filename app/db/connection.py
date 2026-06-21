@@ -53,6 +53,8 @@ _COLUMN_MIGRATIONS = [
     ("application", "verdict", "TEXT"),
     ("application", "verdict_note", "TEXT"),
     ("application", "verdict_at", "TEXT"),
+    ("candidate_profile_version", "target_canonical_roles_json", "TEXT"),
+    ("candidate_profile_version", "avoid_canonical_roles_json", "TEXT"),
 ]
 
 

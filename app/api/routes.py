@@ -117,6 +117,7 @@ def application_detail(application_id: int,
         if not app:
             raise HTTPException(status_code=404, detail="Application not found")
         app["signals"] = score_repo.get_signals(conn, application_id)
+        app["explain"] = score_repo.score_explanation(app)  # score breakdown for the detail view
     return app
 
 

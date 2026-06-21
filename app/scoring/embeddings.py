@@ -8,6 +8,7 @@ probes Ollama exactly once per run, not per job.
 from __future__ import annotations
 
 import logging
+import time
 from typing import List, Optional, Tuple
 
 import httpx
@@ -15,8 +16,13 @@ import numpy as np
 
 from app import util
 from app.config import get_settings
+from app.core import telemetry
 
 log = logging.getLogger("scoring.embeddings")
+
+
+def _ms(start: float) -> int:
+    return int((time.monotonic() - start) * 1000)
 
 
 def _cosine(a: List[float], b: List[float]) -> float:
@@ -42,27 +48,40 @@ class EmbeddingProvider:
         self.url = s.ollama_url.rstrip("/")
         self.model = s.embedding_model
         self.available = self._probe()
-        log.info("embedding backend: %s",
-                 f"ollama:{self.model}" if self.available else "fallback:token-overlap")
+        backend = f"ollama:{self.model}" if self.available else "fallback:token-overlap"
+        log.info("embedding backend: %s", backend)
+        telemetry.record_event("EMBEDDING", "backend_selected", source="OLLAMA",
+                               message=backend, metadata={"available": self.available})
 
     def _probe(self) -> bool:
+        url = f"{self.url}/api/tags"
+        start = time.monotonic()
         try:
-            r = httpx.get(f"{self.url}/api/tags", timeout=2.0)
+            r = httpx.get(url, timeout=2.0)
+            telemetry.record_api_call("OLLAMA", "GET", url, status_code=r.status_code,
+                                      latency_ms=_ms(start), ok=r.status_code == 200)
             return r.status_code == 200
-        except Exception:
+        except Exception as e:
+            telemetry.record_api_call("OLLAMA", "GET", url, status_code=None,
+                                      latency_ms=_ms(start), ok=False, error=type(e).__name__)
             return False
 
     def embed(self, text: str) -> Optional[List[float]]:
         if not self.available or not text:
             return None
+        url = f"{self.url}/api/embeddings"
+        start = time.monotonic()
         try:
-            r = httpx.post(f"{self.url}/api/embeddings",
-                           json={"model": self.model, "prompt": text[:8000]},
-                           timeout=30.0)
+            r = httpx.post(url, json={"model": self.model, "prompt": text[:8000]}, timeout=30.0)
+            telemetry.record_api_call("OLLAMA", "POST", url, status_code=r.status_code,
+                                      latency_ms=_ms(start), ok=r.is_success)
             r.raise_for_status()
             vec = r.json().get("embedding")
             return vec if vec else None
         except Exception as e:
+            telemetry.record_api_call("OLLAMA", "POST", url, status_code=None,
+                                      latency_ms=_ms(start), ok=False, error=type(e).__name__)
+            telemetry.record_error("EMBEDDING", "OLLAMA", e)
             log.warning("embed failed, falling back to token overlap: %s", e)
             self.available = False
             return None

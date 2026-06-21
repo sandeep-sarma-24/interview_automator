@@ -56,7 +56,7 @@ def test_role_filter_drops_nontech():
     jobs = [NormalizedJob(title=t, company_name="Acme", source="API", discovery_method="API")
             for t in ["Backend Engineer", "Account Executive", "Product Manager"]]
     kept, dropped = _role_filter(jobs)
-    assert dropped == 1 and len(kept) == 2
+    assert len(dropped) == 1 and len(kept) == 2
     classes = {j.title: j.role_class for j in kept}
     assert classes["Backend Engineer"] == KEEP
     assert classes["Product Manager"] == SOFT_DROP
