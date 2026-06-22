@@ -11,6 +11,15 @@ import CompaniesPage from "./pages/CompaniesPage";
 import DiagnosticsPage from "./pages/DiagnosticsPage";
 import YouPage from "./pages/YouPage";
 import NotFoundPage from "./pages/NotFoundPage";
+import RequireOps from "./ops/RequireOps";
+import OpsLogin from "./ops/pages/OpsLogin";
+import OpsOverview from "./ops/pages/OpsOverview";
+import OpsDiscovery from "./ops/pages/OpsDiscovery";
+import OpsWorker from "./ops/pages/OpsWorker";
+import OpsApiCalls from "./ops/pages/OpsApiCalls";
+import OpsErrors from "./ops/pages/OpsErrors";
+import OpsRoles from "./ops/pages/OpsRoles";
+import OpsExplain from "./ops/pages/OpsExplain";
 
 export default function App() {
   return (
@@ -30,6 +39,18 @@ export default function App() {
             <Route path="/you" element={<YouPage />} />
           </Route>
         </Route>
+      </Route>
+
+      {/* Operator dashboard — separate OPS_TOKEN auth, not the candidate login */}
+      <Route path="/ops/login" element={<OpsLogin />} />
+      <Route path="/ops" element={<RequireOps />}>
+        <Route index element={<OpsOverview />} />
+        <Route path="discovery" element={<OpsDiscovery />} />
+        <Route path="worker" element={<OpsWorker />} />
+        <Route path="api-calls" element={<OpsApiCalls />} />
+        <Route path="errors" element={<OpsErrors />} />
+        <Route path="roles" element={<OpsRoles />} />
+        <Route path="explain" element={<OpsExplain />} />
       </Route>
 
       <Route path="/404" element={<NotFoundPage />} />
